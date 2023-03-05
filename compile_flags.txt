@@ -1,0 +1,4 @@
+-std=c++20
+-stdlib=libc++
+-fprebuit-module-path=.
+-Istl_interfaces/include
