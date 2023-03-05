@@ -62,20 +62,22 @@ public:
 };
 
 export template <typename T>
-struct generator
-    : iterator_interface<generator<T>, std::input_iterator_tag, T> {
+struct input_iterator_generator
+    : iterator_interface<input_iterator_generator<T>, std::input_iterator_tag,
+                         T> {
 
   //////////////////////
   // Coroutine interface
   //////////////////////
 
-  using promise_type = lazy_cache_promise<T, generator>;
+  using promise_type = lazy_cache_promise<T, input_iterator_generator>;
 
   // TODO: I want this to be private, but I don't know how to do that
   // Adding
-  // `friend class iterator_interface<generator<T>, std::input_iterator_tag,
-  // T>;` doesn't work
-  generator(std::coroutine_handle<promise_type> h) : handle_(std::move(h)) {}
+  // `friend class iterator_interface<input_iterator_generator<T>,
+  // std::input_iterator_tag, T>;` doesn't work
+  input_iterator_generator(std::coroutine_handle<promise_type> h)
+      : handle_(std::move(h)) {}
 
   /////////////////////
   // Iterator interface
@@ -87,21 +89,22 @@ struct generator
     assert(handle_.promise().has_filled_cache());
     return handle_.promise().get_filled_cache_value();
   }
-  generator &operator++() {
+  input_iterator_generator &operator++() {
     assert(handle_);
     try_fill_cache();
     assert(!handle_.promise().is_done());
     handle_.promise().clear_cache();
     return *this;
   }
-  friend bool operator==(const generator &lhs, const generator &rhs) {
+  friend bool operator==(const input_iterator_generator &lhs,
+                         const input_iterator_generator &rhs) {
     return lhs.is_end() == rhs.is_end();
   }
 
   /////////////////////
   // External interface
   /////////////////////
-  generator() {}
+  input_iterator_generator() {}
 
 private:
   void try_fill_cache() const {
