@@ -13,8 +13,17 @@ generator<int> f() {
  }
 
  int main() {
-   for( auto i = f(); i != generator<int>{}; ++i )
-     std::cout << *i << std::endl;
+  /*
+  auto i = f();
+  std::cout << "==> begin " << std::endl;
+  i == generator<int>{};
+  std::cout << "==> get value " << std::endl;
+  auto v = *i;
+  std::cout << "==> " << v << std::endl;
+  */
+
+  for( auto i = f(); i != generator<int>{}; ++i )
+    std::cout << "==> " <<  *i << std::endl;
 
    std::vector<int> v;
    std::copy(f(), generator<int>{}, std::back_inserter(v));
