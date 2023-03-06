@@ -4,6 +4,7 @@ module;
 
 #include <cassert>
 #include <coroutine>
+#include <ranges>
 #include <variant>
 
 export module corotest;
@@ -83,7 +84,7 @@ struct input_iterator_generator
   // Iterator interface
   /////////////////////
 
-  const T& operator*() const {
+  const T &operator*() const {
     assert(handle_);
     try_fill_cache();
     assert(handle_.promise().has_filled_cache());
@@ -119,6 +120,73 @@ private:
       return handle_.promise().is_done();
     }
   }
+
+  std::coroutine_handle<promise_type> handle_ = {};
+};
+
+export template <typename BaseType, typename T>
+struct input_iterator_generator_g
+    : iterator_interface<BaseType, std::input_iterator_tag, T> {
+
+  /////////////////////
+  // Iterator interface
+  /////////////////////
+
+  template <typename unused = void> const T &operator*() const {
+    assert(static_cast<BaseType const *>(this)->handle_);
+    try_fill_cache();
+    assert(static_cast<BaseType const *>(this)->handle_.promise().has_filled_cache());
+    return static_cast<BaseType const *>(this)
+        ->handle_.promise()
+        .get_filled_cache_value();
+  }
+  template <typename unused = void> BaseType &operator++() {
+    assert(static_cast<BaseType *>(this)->handle_);
+    try_fill_cache();
+    assert(!static_cast<BaseType *>(this)->handle_.promise().is_done());
+    static_cast<BaseType *>(this)->handle_.promise().clear_cache();
+    return *static_cast<BaseType *>(this);
+  }
+  template <typename unused = void> bool operator==(const BaseType &rhs) const{
+    return static_cast<BaseType const *>(this)->is_end() == rhs.is_end();
+  }
+
+private:
+  template <typename unused = void> void try_fill_cache() const {
+    if (static_cast<BaseType const *>(this)->handle_.promise().has_empty_cache())
+      static_cast<BaseType const *>(this)->handle_.resume();
+  }
+  template <typename unused = void> bool is_end() const {
+    if (!static_cast<BaseType const *>(this)->handle_) {
+      return true;
+    } else {
+      try_fill_cache();
+      return static_cast<BaseType const *>(this)->handle_.promise().is_done();
+    }
+  }
+};
+
+export template <typename T>
+struct view_generator // : public std::ranges::view_interface<view_generator<T>>
+{
+  //////////////////////
+  // Coroutine interface
+  //////////////////////
+
+  using promise_type = lazy_cache_promise<T, view_generator>;
+
+  struct iterator : public input_iterator_generator_g<iterator, T> {
+    iterator(std::coroutine_handle<promise_type> handle)
+        : handle_(std::move(handle)) {}
+    iterator() : handle_{} {}
+    std::coroutine_handle<promise_type> handle_;
+  };
+
+  view_generator(std::coroutine_handle<promise_type> h)
+      : handle_(std::move(h)) {}
+
+  auto begin() const { return iterator(handle_); }
+  auto end() const { return iterator(); }
 
   std::coroutine_handle<promise_type> handle_ = {};
 };

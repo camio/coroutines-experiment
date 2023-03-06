@@ -1,7 +1,7 @@
 .PHONY: all clean
 
 CXX:= clang++
-CXXFLAGS:=-std=c++20 -stdlib=libc++
+CXXFLAGS:=-std=c++20 # -stdlib=libc++
 CPPFLAGS:=-fprebuilt-module-path=. -Istl_interfaces/include
 
 all: main
