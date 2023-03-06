@@ -83,7 +83,7 @@ struct input_iterator_generator
   // Iterator interface
   /////////////////////
 
-  T operator*() const {
+  const T& operator*() const {
     assert(handle_);
     try_fill_cache();
     assert(handle_.promise().has_filled_cache());
