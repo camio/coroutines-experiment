@@ -11,13 +11,13 @@ export module corotest;
 
 using boost::stl_interfaces::iterator_interface;
 
-template <typename T, typename C> class lazy_cache_promise {
+template <typename ValueType, typename Coroutine> class lazy_cache_promise {
   struct CacheEmpty {
     bool operator==(const CacheEmpty &) const = default;
   };
   struct CacheFilled {
     bool operator==(const CacheFilled &) const = default;
-    T value;
+    ValueType value;
   };
   struct Done {
     bool operator==(const Done &) const = default;
@@ -28,8 +28,9 @@ public:
   ///////////////////////////////
   // Coroutine promise interface
   ///////////////////////////////
-  C get_return_object() {
-    return C{std::coroutine_handle<lazy_cache_promise>::from_promise(*this)};
+  Coroutine get_return_object() {
+    return Coroutine{
+        std::coroutine_handle<lazy_cache_promise>::from_promise(*this)};
   }
   std::suspend_always initial_suspend() { return {}; }
   std::suspend_never final_suspend() noexcept {
@@ -37,7 +38,7 @@ public:
     return {};
   }
   void unhandled_exception() {}
-  std::suspend_always yield_value(T value) {
+  std::suspend_always yield_value(ValueType value) {
     state_ = CacheFilled{std::move(value)};
     return {};
   }
@@ -54,7 +55,7 @@ public:
   }
   bool is_done() const { return std::get_if<Done>(&state_) != nullptr; }
 
-  const T &get_filled_cache_value() const {
+  const ValueType &get_filled_cache_value() const {
     CacheFilled const *const cacheFilled = std::get_if<CacheFilled>(&state_);
     assert(cacheFilled != nullptr);
     return cacheFilled->value;
@@ -62,131 +63,129 @@ public:
   void clear_cache() { state_ = CacheEmpty{}; }
 };
 
-export template <typename T>
-struct input_iterator_generator
-    : iterator_interface<input_iterator_generator<T>, std::input_iterator_tag,
-                         T> {
-
-  //////////////////////
-  // Coroutine interface
-  //////////////////////
-
-  using promise_type = lazy_cache_promise<T, input_iterator_generator>;
-
-  // TODO: I want this to be private, but I don't know how to do that
-  // Adding
-  // `friend class iterator_interface<input_iterator_generator<T>,
-  // std::input_iterator_tag, T>;` doesn't work
-  input_iterator_generator(std::coroutine_handle<promise_type> h)
-      : handle_(std::move(h)) {}
-
-  /////////////////////
-  // Iterator interface
-  /////////////////////
-
-  const T &operator*() const {
-    assert(handle_);
+// This CRTP class provides an input iterator interface to a class with a
+// coroutine handle to a lazy_cache_promise.
+//
+// Requirements - `Derived` must have
+// d.get_coroutine_handle() which returns a value of type
+// `std::coroutine_handle<lazy_cache_promise<ValueType, C>>` for some type C.
+export template <typename Derived, typename ValueType>
+struct input_iterator_coroutine_adapter
+    : iterator_interface<Derived, std::input_iterator_tag, ValueType> {
+public:
+  using base_type =
+      iterator_interface<Derived, std::input_iterator_tag, ValueType>;
+  const ValueType &operator*() const {
+    const auto &h = derived().get_coroutine_handle();
+    assert(h);
     try_fill_cache();
-    assert(handle_.promise().has_filled_cache());
-    return handle_.promise().get_filled_cache_value();
+    const auto &p = h.promise();
+    assert(p.has_filled_cache());
+    return p.get_filled_cache_value();
   }
-  input_iterator_generator &operator++() {
-    assert(handle_);
+  Derived &operator++() {
+    const auto &h = derived().get_coroutine_handle();
+    assert(h);
     try_fill_cache();
-    assert(!handle_.promise().is_done());
-    handle_.promise().clear_cache();
-    return *this;
+    auto &p = h.promise();
+    assert(!p.is_done());
+    p.clear_cache();
+    return derived();
   }
-  friend bool operator==(const input_iterator_generator &lhs,
-                         const input_iterator_generator &rhs) {
-    return lhs.is_end() == rhs.is_end();
+  bool operator==(const input_iterator_coroutine_adapter &rhs) const {
+    return derived().is_end() == rhs.is_end();
   }
 
-  /////////////////////
-  // External interface
-  /////////////////////
-  input_iterator_generator() {}
+  using base_type::operator++;
 
 private:
   void try_fill_cache() const {
-    if (handle_.promise().has_empty_cache())
-      handle_.resume();
+    const auto &h = derived().get_coroutine_handle();
+    if (h.promise().has_empty_cache())
+      h.resume();
   }
   bool is_end() const {
-    if (!handle_) {
+    const auto &h = derived().get_coroutine_handle();
+    if (!h) {
       return true;
     } else {
       try_fill_cache();
-      return handle_.promise().is_done();
+      return h.promise().is_done();
     }
   }
+  constexpr Derived &derived() noexcept {
+    return static_cast<Derived &>(*this);
+  }
+  constexpr Derived const &derived() const noexcept {
+    return static_cast<Derived const &>(*this);
+  }
+};
+
+// This class is a generator coroutine and an input iterator.
+export template <typename ValueType>
+struct input_iterator_generator
+    : input_iterator_coroutine_adapter<input_iterator_generator<ValueType>,
+                                       ValueType> {
+
+  using promise_type = lazy_cache_promise<ValueType, input_iterator_generator>;
+
+  input_iterator_generator() {}
+
+private:
+  input_iterator_generator(std::coroutine_handle<promise_type> h)
+      : handle_(std::move(h)) {}
+
+  // Required for input_iterator_coroutine_adapter.
+  const std::coroutine_handle<promise_type> &get_coroutine_handle() const {
+    return handle_;
+  }
+
+  friend class input_iterator_coroutine_adapter<input_iterator_generator,
+                                                ValueType>;
+  friend class lazy_cache_promise<ValueType, input_iterator_generator>;
 
   std::coroutine_handle<promise_type> handle_ = {};
 };
 
-export template <typename BaseType, typename T>
-struct input_iterator_generator_g
-    : iterator_interface<BaseType, std::input_iterator_tag, T> {
+BOOST_STL_INTERFACES_STATIC_ASSERT_CONCEPT(input_iterator_generator<int>, std::input_iterator)
 
-  /////////////////////
-  // Iterator interface
-  /////////////////////
+// This class is a generator coroutine and a ranges view.
+export
+template <typename ValueType>
+struct view_generator
+    : public std::ranges::view_interface<view_generator<ValueType>> {
 
-  template <typename unused = void> const T &operator*() const {
-    assert(static_cast<BaseType const *>(this)->handle_);
-    try_fill_cache();
-    assert(static_cast<BaseType const *>(this)->handle_.promise().has_filled_cache());
-    return static_cast<BaseType const *>(this)
-        ->handle_.promise()
-        .get_filled_cache_value();
-  }
-  template <typename unused = void> BaseType &operator++() {
-    assert(static_cast<BaseType *>(this)->handle_);
-    try_fill_cache();
-    assert(!static_cast<BaseType *>(this)->handle_.promise().is_done());
-    static_cast<BaseType *>(this)->handle_.promise().clear_cache();
-    return *static_cast<BaseType *>(this);
-  }
-  template <typename unused = void> bool operator==(const BaseType &rhs) const{
-    return static_cast<BaseType const *>(this)->is_end() == rhs.is_end();
-  }
-
-private:
-  template <typename unused = void> void try_fill_cache() const {
-    if (static_cast<BaseType const *>(this)->handle_.promise().has_empty_cache())
-      static_cast<BaseType const *>(this)->handle_.resume();
-  }
-  template <typename unused = void> bool is_end() const {
-    if (!static_cast<BaseType const *>(this)->handle_) {
-      return true;
-    } else {
-      try_fill_cache();
-      return static_cast<BaseType const *>(this)->handle_.promise().is_done();
-    }
-  }
-};
-
-export template <typename T>
-struct view_generator // : public std::ranges::view_interface<view_generator<T>>
-{
-  //////////////////////
   // Coroutine interface
-  //////////////////////
+  using promise_type = lazy_cache_promise<ValueType, view_generator>;
 
-  using promise_type = lazy_cache_promise<T, view_generator>;
-
-  struct iterator : public input_iterator_generator_g<iterator, T> {
+  /////////////////
+  // View interface
+  /////////////////
+  class iterator
+      : public input_iterator_coroutine_adapter<iterator, ValueType> {
+  public:
+    iterator() : handle_{} {}
+  private:
     iterator(std::coroutine_handle<promise_type> handle)
         : handle_(std::move(handle)) {}
-    iterator() : handle_{} {}
+    const std::coroutine_handle<promise_type> &get_coroutine_handle() const {
+      return handle_;
+    }
+    friend class input_iterator_coroutine_adapter<iterator, ValueType>;
+    friend class view_generator;
     std::coroutine_handle<promise_type> handle_;
   };
 
+  auto begin() const { return iterator{handle_}; }
+  auto end() const { return iterator{}; }
+
+private:
+  friend class lazy_cache_promise<ValueType, view_generator>;
   view_generator(std::coroutine_handle<promise_type> h)
       : handle_(std::move(h)) {}
 
-  auto begin() const { return iterator(handle_); }
-  auto end() const { return iterator(); }
-
   std::coroutine_handle<promise_type> handle_ = {};
 };
+
+BOOST_STL_INTERFACES_STATIC_ASSERT_CONCEPT(view_generator<int>::iterator,
+                                           std::input_iterator)
