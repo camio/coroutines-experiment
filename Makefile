@@ -1,8 +1,8 @@
 .PHONY: all clean
 
-CXX:= clang++
-CXXFLAGS:=-std=c++20 # -stdlib=libc++
-CPPFLAGS:=-fprebuilt-module-path=. -Istl_interfaces/include
+CXX := clang++
+CXXFLAGS := -std=c++20
+CPPFLAGS := -fprebuilt-module-path=. -Istl_interfaces/include
 
 all: main
 
@@ -10,24 +10,17 @@ clean:
 	$(RM) main *.o *.pcm
 
 %.pcm: %.cppm
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) --precompile $^ -o $@
-
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) --precompile $< -o $@
 
 %.o : %.pcm
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $^ -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# What follows is a failed attempt to use import <coroutine> instead of
-# including it.
-#
-# %.pcm: %.cppm
-#	 $(CXX) $(CPPFLAGS) $(CXXFLAGS) -fmodule-file=coroutine.pcm --precompile $^ -o $@
-#
-# coroutine.pcm:
-# $(CXX) $(CPPFLAGS) $(CXXFLAGS) -xc++-system-header --precompile coroutine -o $@
-#
-# corotest.cppm: coroutine.pcm
+goro.input_iterator_coroutine_adapter.pcm: goro.lazy_cache_promise.pcm
+goro.input_iterator_generator.pcm: goro.input_iterator_coroutine_adapter.pcm goro.lazy_cache_promise.pcm
+goro.view_generator.pcm: goro.lazy_cache_promise.pcm goro.input_iterator_coroutine_adapter.pcm
+goro.pcm: goro.input_iterator_coroutine_adapter.pcm goro.input_iterator_generator.pcm goro.lazy_cache_promise.pcm goro.view_generator.pcm
 
-main.o: main.cpp corotest.pcm
+main.o: goro.pcm
 
-main: main.o corotest.o
+main: main.o goro.o goro.lazy_cache_promise.o goro.input_iterator_coroutine_adapter.o goro.input_iterator_generator.o goro.view_generator.o
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ -o $@

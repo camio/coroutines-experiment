@@ -4,7 +4,9 @@
 #include <ranges>
 #include <vector>
 
-import corotest;
+import goro;
+
+using namespace goro;
 
 input_iterator_generator<int> f() {
   std::cout << "f starts. About to yield 1" << std::endl;
